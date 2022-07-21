@@ -1,12 +1,11 @@
 import numpy as np
 import scipy.optimize as optimize
 
-from qiskit import Aer, execute, QuantumCircuit
-from qiskit.circuit import Parameter, ParameterVector
+from qiskit import QuantumCircuit
+from qiskit.circuit import Parameter
 from qiskit.opflow import I, X, Y, Z
-from qiskit.opflow import CircuitOp, SummedOp, StateFn
-from qiskit.opflow import PauliExpectation, PauliTrotterEvolution, Suzuki
-from qiskit.quantum_info import Statevector
+from qiskit.opflow import CircuitOp, CircuitStateFn, SummedOp, StateFn
+from qiskit.opflow import PauliTrotterEvolution, Suzuki
 
 
 def get_heisenberg_int(nb_qubits, j, periodic=True):
@@ -80,16 +79,21 @@ def state_evolution(state, hamiltonian, tau, num_reps, trotter_order):
     return qc
 
 
-def get_current_sv(init_state, hamiltonian, current_t):
+def get_current_sv_np(init_state, hamiltonian, current_t):
     hamiltonian_matrix = hamiltonian.to_matrix()
     eigval, eigvec = np.linalg.eigh(hamiltonian_matrix)
     u = eigvec
     u_dag = np.conj(eigvec).T
 
-    sv_sim = Aer.get_backend('statevector_simulator')
-    init_state_sv = execute(init_state, sv_sim).result().get_statevector()
+    init_state_sv = CircuitStateFn(init_state).to_matrix()
+    return u @ \
+           (np.identity(16) * np.exp(-1.j * eigval.reshape((-1, 1)) * current_t)) @ \
+           u_dag @ np.asarray(init_state_sv).reshape((-1, 1))
 
-    return u @ np.exp(-1.j * eigval.reshape((-1, 1)) * current_t) * u_dag @ np.asarray(init_state_sv).reshape((-1, 1))
+
+def get_current_sv_opflow(init_state, hamiltonian, current_t):
+
+    return ((current_t * hamiltonian).exp_i() @ CircuitStateFn(init_state)).eval()
 
 
 def objective_fct(params, t_params, p_params, init_state, circuit, hamiltonian, current_t):
@@ -98,7 +102,7 @@ def objective_fct(params, t_params, p_params, init_state, circuit, hamiltonian, 
     params_dict = {t: params[i] for (i, t) in enumerate(t_params)}
     params_dict.update({p: params[i + len(t_params)] for (i, p) in enumerate(p_params)})
     grounded_qc = init_state.compose(circuit).bind_parameters(params_dict)
-    infidelity = 1 - np.linalg.norm((~StateFn(get_current_sv(init_state, hamiltonian, current_t)) @ StateFn(grounded_qc)).eval()) ** 2
+    infidelity = 1 - np.linalg.norm((~get_current_sv_opflow(init_state, hamiltonian, current_t) @ StateFn(grounded_qc)).eval()) ** 2
 
     try:
         current_infidelity.append(infidelity)
