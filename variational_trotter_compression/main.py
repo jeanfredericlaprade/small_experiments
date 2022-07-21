@@ -97,7 +97,11 @@ def objective_fct(params, init_state, circuit, hamiltonian, current_t):
 
     grounded_qc = init_state.compose(circuit).bind_parameters(params)
     infidelity = 1 - np.linalg.norm((~StateFn(get_current_sv(init_state, hamiltonian, current_t)) @ StateFn(grounded_qc)).eval()) ** 2
-    current_infidelity.append(infidelity)
+
+    try:
+        current_infidelity.append(infidelity)
+    except NameError:
+        print('current_infidelity not defined in globals -- skipping')
 
     return infidelity
 
