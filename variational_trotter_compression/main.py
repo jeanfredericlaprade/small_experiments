@@ -18,7 +18,7 @@ def get_heisenberg_int(nb_qubits, j, periodic=True):
         if periodic:
             local_terms.append(op^(I^(nb_qubits - 2))^op)
 
-    return j*SummedOp(local_terms)
+    return (j / 4) * SummedOp(local_terms)
 
 
 def get_compact_2_qubits_unitary(param):
@@ -45,8 +45,8 @@ def get_ansatz(nb_qubits, depth):
     nb_odd_params_per_layer = nb_qubits // 2  # following naming convention from paper,
     # so odd is for entangling between qubits {(0,1),(2,3),...} :|
     nb_even_params_per_layer = (nb_qubits - 1) // 2
-    theta_params = ParameterVector('t', depth * nb_odd_params_per_layer)
-    phi_params = ParameterVector('p', depth * nb_even_params_per_layer)
+    theta_params = [Parameter(f't{i}') for i in range(depth * nb_odd_params_per_layer)]
+    phi_params = [Parameter(f'p{i}') for i in range(depth * nb_even_params_per_layer)]
 
     qc = QuantumCircuit(nb_qubits)
     for l in range(depth):
@@ -92,10 +92,12 @@ def get_current_sv(init_state, hamiltonian, current_t):
     return u @ np.exp(-1.j * eigval.reshape((-1, 1)) * current_t) * u_dag @ np.asarray(init_state_sv).reshape((-1, 1))
 
 
-def objective_fct(params, init_state, circuit, hamiltonian, current_t):
+def objective_fct(params, t_params, p_params, init_state, circuit, hamiltonian, current_t):
     global current_infidelity
 
-    grounded_qc = init_state.compose(circuit).bind_parameters(params)
+    params_dict = {t: params[i] for (i, t) in enumerate(t_params)}
+    params_dict.update({p: params[i + len(t_params)] for (i, p) in enumerate(p_params)})
+    grounded_qc = init_state.compose(circuit).bind_parameters(params_dict)
     infidelity = 1 - np.linalg.norm((~StateFn(get_current_sv(init_state, hamiltonian, current_t)) @ StateFn(grounded_qc)).eval()) ** 2
 
     try:
@@ -129,7 +131,7 @@ def optimize_params(init_state, anzats, hamiltonian, current_t, seed, num_iter, 
     init_params = np.random.random(anzats.num_parameters)
 
     out = optimize.minimize(fun=objective_fct,
-                            args=(init_state, anzats, hamiltonian, current_t),
+                            args=(t_params, p_params, init_state, anzats, hamiltonian, current_t),
                             x0=init_params,
                             method='L-BFGS-B',
                             callback=callback,
@@ -148,7 +150,7 @@ def optimize_params(init_state, anzats, hamiltonian, current_t, seed, num_iter, 
 
 seed = 267
 nb_qubits = 8
-coupling = 1
+coupling = 1  # time will always be defined in multiples of J, so we can take it as 1
 
 hamiltonian = get_heisenberg_int(nb_qubits, coupling)
 init_state = get_neel_state(nb_qubits)
@@ -156,16 +158,20 @@ init_state = get_neel_state(nb_qubits)
 depth_l = 16  # Value used to generate Fig. 5(a)
 anzats, t_params, p_params = get_ansatz(nb_qubits, depth_l)
 
-epsilon = 1e-4  # optimization threshold for infidelity (1 - F)
+epsilon = 1e-6  # optimization threshold for infidelity (1 - F)
 
 current_t = 2.
 num_iter = 1000
 
-# optimize_params(init_state=init_state,
-#                 anzats=anzats,
-#                 hamiltonian=hamiltonian,
-#                 current_t=current_t,
-#                 seed=seed,num_iter=num_iter,
-#                 epsilon=epsilon)
 
-params_final = np.load('final_params_8_267_1000_2.0.npy', allow_pickle=True)
+if __name__ == "__main__":
+    # params_final = np.load('final_params_8_267_1000_2.0.npy', allow_pickle=True)
+    # infidelity = objective_fct(params_final, t_params, p_params, init_state, anzats, hamiltonian, current_t)
+    # print(infidelity)
+    optimize_params(init_state=init_state,
+                    anzats=anzats,
+                    hamiltonian=hamiltonian,
+                    current_t=current_t,
+                    seed=seed,
+                    num_iter=num_iter,
+                    epsilon=epsilon)
